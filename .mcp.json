@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "skilldeck_mcp": {
+      "title": "SkillDeck · 可视化 Skill 控制台",
+      "description": "把本地 Skill 渲染成 Codex 原生 widget 卡片墙，点使用把该 Skill 的命令发送到 Codex 会话执行。",
+      "command": "node",
+      "args": ["./mcp/server.mjs"],
+      "cwd": "."
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "skilldeck",
+  "version": "0.1.0",
+  "description": "SkillDeck · 可视化 Skill 控制台——导入本地 Skill 文件夹，卡片展示，一键把命令投送给 codex / qodercli 执行",
+  "bin": {
+    "skilldeck": "server.js"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "main": "server.js",
+  "keywords": [],
+  "author": "",
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.7.4",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  }
+}

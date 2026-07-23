@@ -1,0 +1,88 @@
+:root {
+  --bg: transparent; --panel: rgba(23,26,33,.9); --panel2: #1e222b; --line: #2a2f3a;
+  --text: #e7e9ee; --sub: #9aa1af; --accent: #6ee7b7; --accent2: #3b82f6; --red: #f2555a;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  color: var(--text); background: var(--bg);
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 13px; padding: 12px 14px 16px;
+}
+
+.sd-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.sd-brand { font-weight: 700; letter-spacing: .5px; display: flex; align-items: center; gap: 7px; }
+.sd-logo {
+  width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center;
+  background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #0f1115; font-weight: 800;
+}
+.sd-search {
+  background: var(--panel2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 8px; padding: 7px 12px; font-size: 13px; width: 220px; outline: none;
+}
+.sd-search:focus { border-color: var(--accent2); }
+.sd-cats { display: flex; gap: 6px; flex-wrap: wrap; }
+.sd-cat {
+  padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--panel2); color: var(--sub); font-size: 11.5px; cursor: pointer;
+}
+.sd-cat:hover { color: var(--text); }
+.sd-cat.active { background: var(--accent2); color: #fff; border-color: var(--accent2); }
+.sd-count { margin-left: auto; color: var(--sub); font-size: 11.5px; }
+
+.sd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.sd-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px; display: flex; flex-direction: column; gap: 9px; transition: transform .12s, border-color .12s;
+}
+.sd-card:hover { transform: translateY(-2px); border-color: var(--accent); }
+.sd-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.sd-card-name { font-weight: 700; font-size: 14px; line-height: 1.3; word-break: break-word; }
+.sd-card-cat {
+  flex: none; font-size: 10px; color: var(--accent); border: 1px solid var(--line);
+  border-radius: 6px; padding: 2px 6px; white-space: nowrap;
+}
+.sd-card-desc { color: var(--sub); font-size: 12px; line-height: 1.55; flex: 1; }
+.sd-card-foot { display: flex; align-items: center; justify-content: space-between; }
+.sd-card-folder { font-size: 10.5px; color: #6b7280; font-family: ui-monospace, monospace; }
+.sd-use {
+  background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #0f1115;
+  font-weight: 700; border: none; border-radius: 8px; padding: 6px 15px; font-size: 12.5px; cursor: pointer;
+}
+.sd-use:hover { filter: brightness(1.06); }
+.sd-empty { padding: 40px; text-align: center; color: var(--sub); }
+
+/* 弹窗 */
+.sd-mask { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 50; padding: 18px; }
+.sd-modal { background: #171a21; border: 1px solid var(--line); border-radius: 14px; width: 100%; max-width: 520px; padding: 20px; max-height: 92vh; overflow-y: auto; }
+.sd-modal-head { display: flex; justify-content: space-between; align-items: flex-start; }
+.sd-modal-name { font-size: 17px; font-weight: 800; }
+.sd-modal-cat { font-size: 11.5px; color: var(--accent); margin-top: 3px; }
+.sd-x { background: none; border: none; color: var(--sub); font-size: 22px; cursor: pointer; line-height: 1; }
+.sd-modal-desc {
+  color: var(--sub); font-size: 12px; line-height: 1.65; margin: 12px 0; max-height: 110px; overflow-y: auto;
+  padding: 10px 12px; background: var(--panel2); border-radius: 9px; border: 1px solid var(--line);
+}
+.sd-label { font-size: 11.5px; color: var(--sub); display: block; margin-bottom: 6px; }
+.sd-task {
+  width: 100%; min-height: 64px; background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 9px; padding: 9px 11px; font-size: 12.5px; outline: none; resize: vertical; font-family: inherit;
+}
+.sd-task:focus { border-color: var(--accent2); }
+.sd-cmd-label { font-size: 11.5px; color: var(--sub); margin: 12px 0 6px; }
+.sd-cmd {
+  background: #0b0d11; border: 1px solid var(--line); border-radius: 9px; padding: 11px;
+  font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--accent);
+  white-space: pre-wrap; word-break: break-word; line-height: 1.6; max-height: 150px; overflow-y: auto;
+}
+.sd-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.sd-btn { border: 1px solid var(--line); background: var(--panel2); color: var(--text); border-radius: 8px; padding: 8px 15px; font-size: 12.5px; cursor: pointer; }
+.sd-btn.ghost { background: transparent; }
+.sd-btn.primary { background: var(--accent); color: #0f1115; border-color: var(--accent); font-weight: 700; }
+.sd-btn.primary:hover { filter: brightness(1.05); }
+.sd-btn:disabled { opacity: .6; cursor: default; }
+
+.sd-toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  background: #171a21; border: 1px solid var(--accent); color: var(--text);
+  padding: 10px 18px; border-radius: 10px; font-size: 13px; z-index: 60; box-shadow: 0 6px 24px rgba(0,0,0,.4);
+}

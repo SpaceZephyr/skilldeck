@@ -1,0 +1,26 @@
+{
+  "name": "skilldeck",
+  "version": "0.2.0",
+  "description": "SkillDeck —— 可视化 Skill 控制台。把本地 Skill 变成 Codex 里的原生卡片墙，点使用把命令发送到会话执行。",
+  "author": { "name": "空格" },
+  "keywords": ["skill", "widget", "console", "codex", "productivity"],
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "SkillDeck",
+    "shortDescription": "在 Codex 里用卡片墙浏览本地 Skill，一键把命令发送到会话执行。",
+    "longDescription": "SkillDeck 把你本地的一堆 Skill（默认 ~/.claude/skills）渲染成 Codex 原生 widget 卡片墙：每张卡显示 Skill 名称、一句话介绍、分类。点某张卡的「使用」，填写具体任务并确认后，SkillDeck 会把这条命令通过 sendFollowUpMessage 发送到当前 Codex 会话，由 Codex 直接执行。",
+    "developerName": "空格",
+    "category": "Productivity",
+    "brandColor": "#6ee7b7",
+    "capabilities": [
+      "本地 Skill 卡片墙",
+      "Codex 原生 widget",
+      "关键词自动分类",
+      "一键发送命令到会话"
+    ],
+    "defaultPrompt": [
+      "打开 SkillDeck。",
+      "用 SkillDeck 浏览我的 Skill。"
+    ]
+  }
+}

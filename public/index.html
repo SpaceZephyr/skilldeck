@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SkillDeck · 技控台</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">▚</span>
+      <div>
+        <div class="brand-name">SkillDeck</div>
+        <div class="brand-sub">可视化 Skill 控制台</div>
+      </div>
+    </div>
+    <div class="dir-box">
+      <input id="dir" class="dir-input" placeholder="本地 Skill 文件夹路径" />
+      <button id="load" class="btn">导入 / 刷新</button>
+    </div>
+    <div class="agent-box">
+      <span class="agent-label">Agent</span>
+      <select id="agent" class="agent-select"></select>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <input id="search" class="search" placeholder="搜索 Skill 名称或功能…" />
+    <div id="cats" class="cats"></div>
+    <span id="count" class="count"></span>
+  </div>
+
+  <main id="grid" class="grid"></main>
+  <div id="empty" class="empty" style="display:none"></div>
+
+  <!-- 使用弹窗 -->
+  <div id="modal" class="modal-mask" style="display:none">
+    <div class="modal">
+      <div class="modal-head">
+        <div>
+          <div class="modal-skill" id="m-name"></div>
+          <div class="modal-cat" id="m-cat"></div>
+        </div>
+        <button class="modal-x" id="m-close">×</button>
+      </div>
+      <div class="modal-desc" id="m-desc"></div>
+      <label class="modal-label">补充说明 / 具体任务（可留空）</label>
+      <textarea id="m-task" class="modal-task" placeholder="例如：帮我给这篇讲 Loop 工程的文章起 10 个标题"></textarea>
+      <div class="modal-cmd-label">将发送给 <b id="m-agent"></b> 的命令：</div>
+      <pre class="modal-cmd" id="m-cmd"></pre>
+      <div class="modal-actions">
+        <button class="btn ghost" id="m-cancel">取消</button>
+        <button class="btn primary" id="m-send">确认发送到 Codex</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 运行输出抽屉 -->
+  <div id="run" class="run-drawer" style="display:none">
+    <div class="run-head">
+      <div class="run-title"><span id="run-skill"></span> · 运行结果</div>
+      <div class="run-status" id="run-status">运行中…</div>
+      <button class="run-x" id="run-close">×</button>
+    </div>
+    <div class="run-cmd" id="run-cmd"></div>
+    <pre class="run-out" id="run-out"></pre>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

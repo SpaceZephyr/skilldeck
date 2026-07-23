@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>/* __SKILLDECK_WIDGET_CSS__ */</style>
+</head>
+<body>
+  <div class="sd-toolbar">
+    <div class="sd-brand"><span class="sd-logo">▚</span> SkillDeck</div>
+    <input id="search" class="sd-search" placeholder="搜索 Skill…" />
+    <div id="cats" class="sd-cats"></div>
+    <span id="count" class="sd-count"></span>
+  </div>
+
+  <div id="grid" class="sd-grid"></div>
+  <div id="empty" class="sd-empty" style="display:none"></div>
+
+  <!-- 使用弹窗 -->
+  <div id="modal" class="sd-mask" style="display:none">
+    <div class="sd-modal">
+      <div class="sd-modal-head">
+        <div>
+          <div class="sd-modal-name" id="m-name"></div>
+          <div class="sd-modal-cat" id="m-cat"></div>
+        </div>
+        <button class="sd-x" id="m-close">×</button>
+      </div>
+      <div class="sd-modal-desc" id="m-desc"></div>
+      <label class="sd-label">补充说明 / 具体任务（可留空）</label>
+      <textarea id="m-task" class="sd-task" placeholder="例如：帮我给这篇讲 Loop 工程的文章起 10 个标题"></textarea>
+      <div class="sd-cmd-label">确认后，将把这条命令发送到 Codex 输入框执行：</div>
+      <pre class="sd-cmd" id="m-cmd"></pre>
+      <div class="sd-actions">
+        <button class="sd-btn ghost" id="m-cancel">取消</button>
+        <button class="sd-btn primary" id="m-send">确认发送到 Codex</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="sd-toast" style="display:none"></div>
+
+  <script>/* __SKILLDECK_WIDGET_JS__ */</script>
+</body>
+</html>
