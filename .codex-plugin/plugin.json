@@ -1,6 +1,6 @@
 {
   "name": "skilldeck",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "SkillDeck —— 可视化 Skill 控制台。把本地 Skill 变成 Codex 里的原生卡片墙，点使用把命令发送到会话执行。",
   "author": { "name": "空格" },
   "keywords": ["skill", "widget", "console", "codex", "productivity"],

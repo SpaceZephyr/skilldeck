@@ -16,6 +16,32 @@ const DEFAULT_SKILLS_DIR = process.env.SKILLS_DIR || path.join(os.homedir(), '.c
 // 让子进程能找到装在 ~/.local/bin 的 qodercli 等
 const CHILD_PATH = `${path.join(os.homedir(), '.local', 'bin')}:${process.env.PATH || ''}`;
 
+// ---------- 配置（DeepSeek）与专家存储 ----------
+const CONFIG_FILE = path.join(__dirname, '.skilldeck.local.json');
+const EXPERTS_FILE = path.join(__dirname, 'experts.json');
+
+function loadConfig() {
+  let cfg = {};
+  try { cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch (_) {}
+  return {
+    apiKey: process.env.DEEPSEEK_API_KEY || cfg.deepseekApiKey || '',
+    baseUrl: (process.env.DEEPSEEK_BASE_URL || cfg.baseUrl || 'https://api.deepseek.com').replace(/\/+$/, ''),
+    model: process.env.DEEPSEEK_MODEL || cfg.model || 'deepseek-chat',
+  };
+}
+function loadExperts() {
+  try {
+    const j = JSON.parse(fs.readFileSync(EXPERTS_FILE, 'utf8'));
+    return Array.isArray(j) ? j : (j.experts || []);
+  } catch (_) { return []; }
+}
+function saveExperts(list) {
+  fs.writeFileSync(EXPERTS_FILE, JSON.stringify(list, null, 2));
+}
+function newExpertId() {
+  return 'exp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
 // ---------- Skill 解析 ----------
 function parseFrontmatter(md) {
   const m = md.match(/^---\s*\n([\s\S]*?)\n---/);
@@ -121,14 +147,107 @@ function detectAgents() {
 }
 const AGENTS = detectAgents();
 
+// 定位某个 Skill 的 SKILL.md 绝对路径（兼容大小写）
+function getSkillFile(dir, folder) {
+  return ['SKILL.md', 'skill.md', 'Skill.md']
+    .map((f) => path.join(dir || DEFAULT_SKILLS_DIR, folder, f))
+    .find((x) => fs.existsSync(x)) || '';
+}
+
 // 读取某个 Skill 的 SKILL.md 正文（去掉 frontmatter），用于注入到命令
 function getSkillBody(dir, folder) {
-  const p = ['SKILL.md', 'skill.md', 'Skill.md']
-    .map((f) => path.join(dir, folder, f))
-    .find((x) => fs.existsSync(x));
+  const p = getSkillFile(dir, folder);
   if (!p) return '';
   const md = fs.readFileSync(p, 'utf8');
   return md.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, '').trim();
+}
+
+// 构造「粘贴到 Codex 的口令」——不依赖具体 agent 二进制。
+//   mode=path（默认）：给 Codex 指路——调用哪个 Skill + 补充说明 + SKILL.md 调用地址，让 Codex 自己读。短且稳。
+//   mode=inject：把 SKILL.md 正文整篇塞进去（换机器 / Codex 读不到该路径时用）。
+function buildPrompt(name, task, dir, folder, mode) {
+  const note = task || '（无，按该 Skill 的默认流程执行）';
+  if (mode === 'inject') {
+    const body = folder ? getSkillBody(dir || DEFAULT_SKILLS_DIR, folder) : '';
+    if (body) {
+      return (
+        `请严格按照下面这份《Skill 说明书》的方法来完成任务，只输出最终结果，不要复述说明书。\n\n` +
+        `===== Skill 说明书：${name} =====\n${body}\n\n` +
+        `===== 你的任务 =====\n${note}`
+      );
+    }
+  }
+  // 默认：路径式口令
+  const file = folder ? getSkillFile(dir, folder) : '';
+  return (
+    `请调用 Skill：${name}\n` +
+    `补充说明：${note}\n` +
+    `Skill 调用地址：${file || '（未找到 SKILL.md）'}`
+  );
+}
+
+// 把专家里的 folder 列表解析成 Skill 元信息
+function resolveSkills(dir, folders) {
+  const { skills } = readSkills(dir);
+  const byFolder = new Map((skills || []).map((s) => [s.folder, s]));
+  return (folders || []).map((f) => byFolder.get(f)).filter(Boolean);
+}
+
+// 构造「专家口令」：让 Codex 在整段对话里按关键词自动挑用这组 Skill，并在每步后提示下一步可用的 Skill
+function buildExpertPrompt(expert, dir) {
+  const useDir = expert.dir || dir || DEFAULT_SKILLS_DIR;
+  const items = resolveSkills(useDir, expert.skills);
+  const lines = items
+    .map((s) => `- ${s.name}：${s.oneLine} → 调用地址：${getSkillFile(useDir, s.folder)}`)
+    .join('\n');
+  return (
+    `你现在担任「${expert.name}」${expert.emoji ? '（' + expert.emoji + '）' : ''}。${expert.description || ''}\n\n` +
+    `以下是本次对话中你可以随时调用的一组 Skill。工作方式：\n` +
+    `1. 根据我发来的内容或关键词，自动判断该用哪个 Skill；\n` +
+    `2. 调用时按该 Skill「调用地址」里的 SKILL.md 说明来执行；\n` +
+    `3. 每完成一步，主动告诉我：接下来还可以用哪些 Skill 做下一步操作。\n\n` +
+    `可用 Skill（共 ${items.length} 个）：\n${lines}`
+  );
+}
+
+// 调 DeepSeek 把所有 Skill 聚类成若干「专家」
+async function deepseekClassify(skills) {
+  const cfg = loadConfig();
+  if (!cfg.apiKey) throw new Error('未配置 DeepSeek API Key（.skilldeck.local.json 或环境变量 DEEPSEEK_API_KEY）');
+  const list = skills.map((s) => `${s.folder} | ${s.name} | ${s.oneLine}`).join('\n');
+  const system =
+    '你是一个把本地 AI Skill 按用途聚类、打包成「专家」的助手。每个「专家」是一组用途高度相关的 Skill 集合，名字要像职业/角色，例如「内容创作专家」「配图设计专家」「数据分析专家」「飞书协作专家」。';
+  const user =
+    `下面每行是一个 Skill，格式：folder | 名称 | 简介。\n` +
+    `请把它们聚类成若干「专家」（建议 6-12 个，尽量覆盖多数 Skill；一个 Skill 归一个最合适的专家即可）。\n` +
+    `严格返回 JSON：{"experts":[{"name":"中文专家名","emoji":"一个emoji","description":"一句话说明这个专家能干什么","skills":["folder","folder"]}]}。\n` +
+    `skills 数组放对应 Skill 的 folder（第一列原样）。只返回 JSON，不要多余文字。\n\n${list}`;
+  const resp = await fetch(`${cfg.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
+    body: JSON.stringify({
+      model: cfg.model,
+      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+      response_format: { type: 'json_object' },
+      max_tokens: 30000,
+      stream: false,
+    }),
+  });
+  if (!resp.ok) throw new Error(`DeepSeek ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+  const data = await resp.json();
+  const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+  let parsed;
+  try { parsed = JSON.parse(content || '{}'); } catch (_) { throw new Error('模型返回的不是合法 JSON'); }
+  const arr = Array.isArray(parsed) ? parsed : (parsed.experts || []);
+  const valid = new Set(skills.map((s) => s.folder));
+  return arr
+    .map((e) => ({
+      name: String(e.name || '未命名专家').slice(0, 30),
+      emoji: String(e.emoji || '🧩').slice(0, 4),
+      description: String(e.description || '').slice(0, 120),
+      skills: (Array.isArray(e.skills) ? e.skills : []).filter((f) => valid.has(f)),
+    }))
+    .filter((e) => e.skills.length);
 }
 
 function buildCommand(agentId, name, task, dir, folder) {
@@ -158,6 +277,13 @@ function sendJson(res, code, obj) {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(obj));
 }
+function readBody(req) {
+  return new Promise((resolve) => {
+    let b = '';
+    req.on('data', (c) => (b += c));
+    req.on('end', () => { try { resolve(b ? JSON.parse(b) : {}); } catch (_) { resolve({}); } });
+  });
+}
 function serveStatic(res, file) {
   const full = path.join(PUBLIC, file);
   if (!full.startsWith(PUBLIC) || !fs.existsSync(full)) {
@@ -169,7 +295,7 @@ function serveStatic(res, file) {
   fs.createReadStream(full).pipe(res);
 }
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, `http://localhost:${PORT}`);
   const p = u.pathname;
 
@@ -177,16 +303,103 @@ const server = http.createServer((req, res) => {
   if (p === '/app.js' || p === '/style.css') return serveStatic(res, p.slice(1));
 
   if (p === '/api/config') {
+    const cfg = loadConfig();
     return sendJson(res, 200, {
       defaultDir: DEFAULT_SKILLS_DIR,
       agents: AGENTS.map((a) => a.id),
+      hasLLM: !!cfg.apiKey,
+      model: cfg.model,
+      baseUrl: cfg.baseUrl,
+      // 密钥永远不下发前端，只告知是否已配置
     });
+  }
+
+  // 保存模型设置（写入本机 .skilldeck.local.json，不进仓库）
+  if (p === '/api/settings' && req.method === 'POST') {
+    const body = await readBody(req);
+    let cfg = {};
+    try { cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch (_) {}
+    if (typeof body.baseUrl === 'string' && body.baseUrl.trim()) cfg.baseUrl = body.baseUrl.trim();
+    if (typeof body.model === 'string' && body.model.trim()) cfg.model = body.model.trim();
+    // apiKey 留空表示保持不变，只有填了才覆盖
+    if (typeof body.apiKey === 'string' && body.apiKey.trim()) cfg.deepseekApiKey = body.apiKey.trim();
+    try { fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2)); }
+    catch (e) { return sendJson(res, 500, { error: '写入配置失败：' + e.message }); }
+    const now = loadConfig();
+    return sendJson(res, 200, { ok: true, hasLLM: !!now.apiKey, model: now.model, baseUrl: now.baseUrl });
+  }
+
+  // ---------- 专家 ----------
+  if (p === '/api/experts' && req.method === 'GET') {
+    return sendJson(res, 200, { experts: loadExperts() });
+  }
+  if (p === '/api/experts' && req.method === 'POST') {
+    const body = await readBody(req);
+    const experts = loadExperts();
+    const expert = {
+      id: newExpertId(),
+      name: String(body.name || '未命名专家').slice(0, 30),
+      emoji: String(body.emoji || '🧩').slice(0, 4),
+      description: String(body.description || '').slice(0, 200),
+      skills: Array.isArray(body.skills) ? body.skills : [],
+      dir: body.dir || DEFAULT_SKILLS_DIR,
+      source: body.source || 'manual',
+      createdAt: new Date().toISOString(),
+    };
+    experts.push(expert);
+    saveExperts(experts);
+    return sendJson(res, 200, { expert });
+  }
+  if (p === '/api/experts' && req.method === 'DELETE') {
+    const id = u.searchParams.get('id');
+    saveExperts(loadExperts().filter((e) => e.id !== id));
+    return sendJson(res, 200, { ok: true });
+  }
+  // AI 自动分类：调 DeepSeek 生成并落库
+  if (p === '/api/experts/auto' && req.method === 'POST') {
+    const dir = u.searchParams.get('dir') || DEFAULT_SKILLS_DIR;
+    const { skills, error } = readSkills(dir);
+    if (error) return sendJson(res, 400, { error });
+    try {
+      const proposals = await deepseekClassify(skills || []);
+      const created = proposals.map((e) => ({
+        id: newExpertId(),
+        ...e,
+        dir,
+        source: 'auto',
+        createdAt: new Date().toISOString(),
+      }));
+      saveExperts(loadExperts().concat(created));
+      return sendJson(res, 200, { experts: created, dir });
+    } catch (e) {
+      return sendJson(res, 500, { error: String(e.message || e) });
+    }
+  }
+  // 专家口令
+  if (p === '/api/expert-prompt') {
+    const id = u.searchParams.get('id');
+    const dir = u.searchParams.get('dir') || DEFAULT_SKILLS_DIR;
+    const expert = loadExperts().find((e) => e.id === id);
+    if (!expert) return sendJson(res, 404, { error: '专家不存在' });
+    const prompt = buildExpertPrompt(expert, dir);
+    return sendJson(res, 200, { prompt, chars: prompt.length });
   }
 
   if (p === '/api/skills') {
     const dir = u.searchParams.get('dir') || DEFAULT_SKILLS_DIR;
     const result = readSkills(dir);
     return sendJson(res, 200, result);
+  }
+
+  // 返回「粘贴到 Codex 的口令」文本（供前端预览 + 复制）
+  if (p === '/api/prompt') {
+    const name = u.searchParams.get('skill') || '';
+    const task = u.searchParams.get('task') || '';
+    const dir = u.searchParams.get('dir') || DEFAULT_SKILLS_DIR;
+    const folder = u.searchParams.get('folder') || '';
+    const mode = u.searchParams.get('mode') || 'path';
+    const prompt = buildPrompt(name, task, dir, folder, mode);
+    return sendJson(res, 200, { prompt, mode, chars: prompt.length });
   }
 
   // SSE 流式运行

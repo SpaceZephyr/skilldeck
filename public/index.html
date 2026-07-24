@@ -4,37 +4,69 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SkillDeck · 技控台</title>
+<script>try{document.documentElement.dataset.theme=localStorage.getItem('skilldeck-theme')||'dark';}catch(e){}</script>
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="logo">▚</span>
-      <div>
-        <div class="brand-name">SkillDeck</div>
-        <div class="brand-sub">可视化 Skill 控制台</div>
+  <div class="app">
+    <!-- 侧边栏 -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="logo">▚</span>
+        <div>
+          <div class="brand-name">SkillDeck</div>
+          <div class="brand-sub">技控台</div>
+        </div>
       </div>
-    </div>
-    <div class="dir-box">
-      <input id="dir" class="dir-input" placeholder="本地 Skill 文件夹路径" />
-      <button id="load" class="btn">导入 / 刷新</button>
-    </div>
-    <div class="agent-box">
-      <span class="agent-label">Agent</span>
-      <select id="agent" class="agent-select"></select>
-    </div>
-  </header>
+      <nav class="nav">
+        <button class="nav-item active" data-view="skills"><span class="nav-ico">🎴</span> Skill</button>
+        <button class="nav-item" data-view="experts"><span class="nav-ico">🧠</span> 专家</button>
+      </nav>
+      <div class="sidebar-foot">
+        <button id="set-open" class="theme-toggle">⚙️ 模型设置</button>
+        <button id="theme-toggle" class="theme-toggle"><span id="theme-ico">🌙</span> <span id="theme-label">深色</span></button>
+        <span id="llm-badge" class="llm-badge"></span>
+      </div>
+    </aside>
 
-  <div class="toolbar">
-    <input id="search" class="search" placeholder="搜索 Skill 名称或功能…" />
-    <div id="cats" class="cats"></div>
-    <span id="count" class="count"></span>
+    <!-- 主区 -->
+    <div class="main-col">
+      <header class="topbar">
+        <div class="dir-box">
+          <input id="dir" class="dir-input" placeholder="本地 Skill 文件夹路径" />
+          <button id="load" class="btn">导入 / 刷新</button>
+        </div>
+        <div class="agent-box">
+          <span class="agent-label">本地 Agent</span>
+          <select id="agent" class="agent-select"></select>
+        </div>
+      </header>
+
+      <!-- 视图：Skill -->
+      <section id="view-skills" class="view">
+        <div class="toolbar">
+          <input id="search" class="search" placeholder="搜索 Skill 名称或功能…" />
+          <div id="cats" class="cats"></div>
+          <span id="count" class="count"></span>
+        </div>
+        <main id="grid" class="grid"></main>
+        <div id="empty" class="empty" style="display:none"></div>
+      </section>
+
+      <!-- 视图：专家 -->
+      <section id="view-experts" class="view" hidden>
+        <div class="toolbar">
+          <button id="exp-auto" class="btn primary">✨ AI 自动分类生成专家</button>
+          <button id="exp-manual" class="btn">＋ 手动创建专家</button>
+          <span id="exp-count" class="count"></span>
+        </div>
+        <main id="exp-grid" class="grid"></main>
+        <div id="exp-empty" class="empty" style="display:none">还没有专家。点上面「AI 自动分类」让大模型按用途把你的 Skill 打包成专家，或手动挑 Skill 创建。</div>
+      </section>
+    </div>
   </div>
 
-  <main id="grid" class="grid"></main>
-  <div id="empty" class="empty" style="display:none"></div>
-
-  <!-- 使用弹窗 -->
+  <!-- Skill 使用弹窗 -->
   <div id="modal" class="modal-mask" style="display:none">
     <div class="modal">
       <div class="modal-head">
@@ -47,16 +79,87 @@
       <div class="modal-desc" id="m-desc"></div>
       <label class="modal-label">补充说明 / 具体任务（可留空）</label>
       <textarea id="m-task" class="modal-task" placeholder="例如：帮我给这篇讲 Loop 工程的文章起 10 个标题"></textarea>
-      <div class="modal-cmd-label">将发送给 <b id="m-agent"></b> 的命令：</div>
+      <div class="modal-mode">
+        <label class="mode-opt"><input type="radio" name="m-mode" value="path" checked> 路径口令<span class="mode-hint">指名 Skill + 补充说明 + SKILL.md 地址，Codex 自己读（推荐）</span></label>
+        <label class="mode-opt"><input type="radio" name="m-mode" value="inject"> 完整口令<span class="mode-hint">把说明书整篇注入，换机器 / 读不到路径时用</span></label>
+      </div>
+      <div class="modal-cmd-label">复制这段口令，粘贴到 Codex 对话框发送 <span id="m-chars" class="cmd-chars"></span></div>
       <pre class="modal-cmd" id="m-cmd"></pre>
       <div class="modal-actions">
         <button class="btn ghost" id="m-cancel">取消</button>
-        <button class="btn primary" id="m-send">确认发送到 Codex</button>
+        <button class="btn ghost" id="m-run">本地运行</button>
+        <button class="btn primary" id="m-copy">复制口令</button>
       </div>
     </div>
   </div>
 
-  <!-- 运行输出抽屉 -->
+  <!-- 专家使用弹窗 -->
+  <div id="exp-modal" class="modal-mask" style="display:none">
+    <div class="modal">
+      <div class="modal-head">
+        <div>
+          <div class="modal-skill" id="em-name"></div>
+          <div class="modal-cat" id="em-count"></div>
+        </div>
+        <button class="modal-x" id="em-close">×</button>
+      </div>
+      <div class="modal-desc" id="em-desc"></div>
+      <div id="em-skills" class="em-skills"></div>
+      <div class="modal-cmd-label">复制这段口令，粘贴到 Codex 对话框，本轮对话即可按关键词自动调用这些 Skill <span id="em-chars" class="cmd-chars"></span></div>
+      <pre class="modal-cmd" id="em-cmd"></pre>
+      <div class="modal-actions">
+        <button class="btn ghost" id="em-delete">删除专家</button>
+        <button class="btn ghost" id="em-cancel">取消</button>
+        <button class="btn primary" id="em-copy">复制口令</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 手动创建专家弹窗 -->
+  <div id="create-modal" class="modal-mask" style="display:none">
+    <div class="modal">
+      <div class="modal-head">
+        <div class="modal-skill">手动创建专家</div>
+        <button class="modal-x" id="cm-close">×</button>
+      </div>
+      <div class="cm-row">
+        <input id="cm-emoji" class="cm-emoji" maxlength="4" placeholder="🧩" />
+        <input id="cm-name" class="cm-name" placeholder="专家名，例如：内容创作专家" />
+      </div>
+      <input id="cm-desc" class="cm-desc" placeholder="一句话说明这个专家能干什么（可留空）" />
+      <label class="modal-label">勾选归入这个专家的 Skill <span id="cm-picked" class="cmd-chars"></span></label>
+      <input id="cm-filter" class="search cm-filter" placeholder="过滤 Skill…" />
+      <div id="cm-list" class="cm-list"></div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="cm-cancel">取消</button>
+        <button class="btn primary" id="cm-save">保存专家</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 模型设置弹窗 -->
+  <div id="set-modal" class="modal-mask" style="display:none">
+    <div class="modal">
+      <div class="modal-head">
+        <div class="modal-skill">⚙️ 模型设置</div>
+        <button class="modal-x" id="set-close">×</button>
+      </div>
+      <div class="modal-desc">用于「AI 自动分类生成专家」。密钥只保存在本机 <code>.skilldeck.local.json</code>（已加入 .gitignore，不会提交到仓库，也不会下发到页面）。</div>
+      <label class="modal-label">API URL</label>
+      <input id="set-url" class="set-input" placeholder="https://api.deepseek.com" />
+      <label class="modal-label">模型名称</label>
+      <input id="set-model" class="set-input" placeholder="deepseek-v4-pro" />
+      <label class="modal-label">API Key</label>
+      <input id="set-key" class="set-input" type="password" autocomplete="off" placeholder="sk-..." />
+      <div id="set-hint" class="cmd-chars"></div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="set-cancel">取消</button>
+        <button class="btn primary" id="set-save">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 本地运行输出抽屉 -->
   <div id="run" class="run-drawer" style="display:none">
     <div class="run-head">
       <div class="run-title"><span id="run-skill"></span> · 运行结果</div>
