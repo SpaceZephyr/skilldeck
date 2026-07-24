@@ -33,8 +33,10 @@
     <div class="main-col">
       <header class="topbar">
         <div class="dir-box">
+          <button id="pick" class="btn">📁 浏览</button>
           <input id="dir" class="dir-input" placeholder="本地 Skill 文件夹路径" />
-          <button id="load" class="btn">导入 / 刷新</button>
+          <select id="dir-history" class="dir-select" title="历史目录"></select>
+          <button id="load" class="btn primary">导入</button>
         </div>
         <div class="agent-box">
           <span class="agent-label">本地 Agent</span>

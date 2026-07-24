@@ -38,6 +38,26 @@ async function boot() {
   wireNav();
   await loadSkills();
   await loadExperts();
+  await refreshDirHistory();
+}
+
+// ---------- 目录导入 / 历史 ----------
+// 导入一个目录：Skill 和专家一起切换
+async function importDir(dir) {
+  if (dir) $('#dir').value = dir;
+  await loadSkills();     // 读 #dir
+  await loadExperts();    // 读 #dir，只显示该目录下的专家
+  await refreshDirHistory();
+}
+async function refreshDirHistory() {
+  const cur = $('#dir').value.trim();
+  try {
+    const data = await fetch('/api/dirs').then((r) => r.json());
+    const dirs = data.dirs || [];
+    const sel = $('#dir-history');
+    sel.innerHTML = '<option value="">历史目录…</option>' +
+      dirs.map((d) => `<option value="${esc(d)}" ${d === cur ? 'selected' : ''}>${esc(d)}</option>`).join('');
+  } catch (_) {}
 }
 
 // ---------- 视图切换 ----------
@@ -195,7 +215,8 @@ $('#m-run').addEventListener('click', () => {
 
 // ---------- 专家 ----------
 async function loadExperts() {
-  const data = await fetch('/api/experts').then((r) => r.json()).catch(() => ({ experts: [] }));
+  const dir = $('#dir').value.trim();
+  const data = await fetch('/api/experts?dir=' + encodeURIComponent(dir)).then((r) => r.json()).catch(() => ({ experts: [] }));
   state.experts = data.experts || [];
   renderExperts();
 }
@@ -417,8 +438,26 @@ function toast(msg) {
 }
 
 // ---------- 绑定 ----------
-$('#load').addEventListener('click', async () => { await loadSkills(); renderExperts(); });
-$('#dir').addEventListener('keydown', (e) => { if (e.key === 'Enter') { loadSkills().then(renderExperts); } });
+$('#load').addEventListener('click', () => importDir($('#dir').value.trim()));
+$('#dir').addEventListener('keydown', (e) => { if (e.key === 'Enter') importDir($('#dir').value.trim()); });
+// 原生文件夹选择框
+$('#pick').addEventListener('click', async () => {
+  const btn = $('#pick');
+  btn.disabled = true;
+  try {
+    const data = await fetch('/api/pick-dir').then((r) => r.json());
+    if (data.dir) { toast('已选择：' + data.dir); await importDir(data.dir); }
+  } catch (e) {
+    toast('打开选择框失败：' + (e && e.message ? e.message : e));
+  } finally {
+    btn.disabled = false;
+  }
+});
+// 历史目录下拉
+$('#dir-history').addEventListener('change', (e) => {
+  const d = e.target.value;
+  if (d) importDir(d);
+});
 $('#search').addEventListener('input', (e) => { state.q = e.target.value; applyFilter(); });
 
 function esc(s) {

@@ -5,6 +5,7 @@ dist/
 npm-debug.log*
 .env
 .skilldeck.local.json
+.skilldeck.state.json
 experts.json
 .vscode/
 .idea/

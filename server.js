@@ -42,6 +42,41 @@ function newExpertId() {
   return 'exp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
+// 目录历史（本机状态，gitignore）
+const STATE_FILE = path.join(__dirname, '.skilldeck.state.json');
+function loadState() {
+  try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch (_) { return {}; }
+}
+function saveState(s) {
+  try { fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2)); } catch (_) {}
+}
+function recordDir(dir) {
+  if (!dir) return;
+  const s = loadState();
+  const list = Array.isArray(s.recentDirs) ? s.recentDirs : [];
+  s.recentDirs = [dir, ...list.filter((d) => d !== dir)].slice(0, 12);
+  saveState(s);
+}
+function recentDirs() {
+  const s = loadState();
+  const list = Array.isArray(s.recentDirs) ? s.recentDirs : [];
+  // 默认目录 + 专家里出现过的目录都并进来，保证历史齐全
+  const fromExperts = loadExperts().map((e) => e.dir).filter(Boolean);
+  return [...new Set([...list, ...fromExperts, DEFAULT_SKILLS_DIR])];
+}
+// macOS 原生「选择文件夹」对话框，返回绝对路径
+function pickFolder() {
+  try {
+    const out = execSync(
+      `osascript -e 'POSIX path of (choose folder with prompt "选择本地 Skill 文件夹")'`,
+      { encoding: 'utf8' }
+    ).trim();
+    return out.replace(/\/$/, '');
+  } catch (_) {
+    return null; // 用户取消或非 macOS
+  }
+}
+
 // ---------- Skill 解析 ----------
 function parseFrontmatter(md) {
   const m = md.match(/^---\s*\n([\s\S]*?)\n---/);
@@ -331,7 +366,11 @@ const server = http.createServer(async (req, res) => {
 
   // ---------- 专家 ----------
   if (p === '/api/experts' && req.method === 'GET') {
-    return sendJson(res, 200, { experts: loadExperts() });
+    const dir = u.searchParams.get('dir');
+    let experts = loadExperts();
+    // 传了 dir 就只返回该目录下创建的专家（切换目录时恢复对应专家）
+    if (dir) experts = experts.filter((e) => (e.dir || DEFAULT_SKILLS_DIR) === dir);
+    return sendJson(res, 200, { experts });
   }
   if (p === '/api/experts' && req.method === 'POST') {
     const body = await readBody(req);
@@ -388,7 +427,20 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/skills') {
     const dir = u.searchParams.get('dir') || DEFAULT_SKILLS_DIR;
     const result = readSkills(dir);
+    if (!result.error) recordDir(dir); // 成功读取才记入历史
     return sendJson(res, 200, result);
+  }
+
+  // 最近使用过的 Skill 目录（历史）
+  if (p === '/api/dirs') {
+    return sendJson(res, 200, { dirs: recentDirs(), default: DEFAULT_SKILLS_DIR });
+  }
+
+  // 弹出 macOS 原生文件夹选择框，返回绝对路径
+  if (p === '/api/pick-dir') {
+    const dir = pickFolder();
+    if (!dir) return sendJson(res, 200, { cancelled: true });
+    return sendJson(res, 200, { dir });
   }
 
   // 返回「粘贴到 Codex 的口令」文本（供前端预览 + 复制）
