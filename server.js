@@ -208,8 +208,11 @@ const server = http.createServer((req, res) => {
       return res.end();
     }
     send('start', { command: cmd.display });
-    // 参数数组传参，避免命令注入
-    const child = spawn(cmd.bin, cmd.args, { env: { ...process.env, PATH: CHILD_PATH } });
+    // 参数数组传参，避免命令注入；stdin 设 ignore，否则 codex exec 会一直等 stdin 输入而卡住
+    const child = spawn(cmd.bin, cmd.args, {
+      env: { ...process.env, PATH: CHILD_PATH },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     child.stdout.on('data', (d) => send('chunk', d.toString()));
     child.stderr.on('data', (d) => send('chunk', d.toString()));
     child.on('close', (code) => { send('done', { code }); res.end(); });
