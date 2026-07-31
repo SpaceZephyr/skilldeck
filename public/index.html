@@ -21,6 +21,9 @@
       <div class="side-label">Skill 来源</div>
       <nav class="nav" id="src-list"></nav>
       <button id="pick" class="add-dir">添加本地目录</button>
+      <div class="side-label side-label-2">工作台</div>
+      <nav class="nav" id="wb-list"></nav>
+      <button id="wb-add" class="add-dir">新建工作台</button>
       <div class="sidebar-foot">
         <button id="theme-toggle" class="theme-toggle"><span id="theme-label">深色</span></button>
       </div>
@@ -53,6 +56,48 @@
         </div>
         <main id="grid" class="grid"></main>
         <div id="empty" class="empty" style="display:none"></div>
+      </section>
+
+      <!-- 视图：工作台（三栏：文件树 / 预览 / 能做什么） -->
+      <section id="view-bench" class="view" hidden>
+        <div class="bench">
+          <aside class="bench-tree">
+            <div class="bench-tree-head">
+              <span id="bench-count" class="bench-count"></span>
+              <button id="bench-seen" class="linkish" title="把所有红点清掉">标为已读</button>
+            </div>
+            <div id="tree" class="tree"></div>
+          </aside>
+
+          <main class="bench-doc">
+            <div class="bench-doc-head" id="doc-head" hidden>
+              <div class="doc-title" id="doc-title"></div>
+              <div class="doc-acts">
+                <button class="btn icon-btn" id="doc-obsidian" title="在 Obsidian 里打开"></button>
+                <button class="btn icon-btn" id="doc-finder" title="在访达里显示"></button>
+              </div>
+            </div>
+            <div id="doc-files" class="doc-files"></div>
+            <article id="doc" class="doc"></article>
+            <div id="doc-empty" class="empty">在左边点一个文件或作品，这里显示内容。</div>
+          </main>
+
+          <aside class="bench-acts">
+            <div class="acts-sec">
+              <div class="acts-label" id="acts-target">没选中东西</div>
+              <div id="acts-process" class="acts-list"></div>
+            </div>
+            <div class="acts-sec">
+              <div class="acts-label">不选也能跑</div>
+              <div id="acts-collect" class="acts-list"></div>
+            </div>
+            <div class="acts-sec" id="acts-move-sec" hidden>
+              <div class="acts-label">挪到别的阶段</div>
+              <select id="acts-move" class="agent-select acts-move"></select>
+            </div>
+          </aside>
+        </div>
+        <div id="bench-setup" class="empty" hidden></div>
       </section>
 
       <!-- 视图：专家 -->
@@ -175,6 +220,48 @@
     </div>
   </div>
 
+  <!-- 工作台任务口令 -->
+  <div id="task-modal" class="modal-mask" style="display:none">
+    <div class="modal">
+      <div class="modal-head">
+        <div>
+          <div class="modal-skill" id="tk-name"></div>
+          <div class="modal-cat" id="tk-sub"></div>
+        </div>
+        <button class="modal-x" id="tk-close">×</button>
+      </div>
+      <div class="modal-cmd-label">复制这段口令，粘到 Codex 或 Claude Code 发送 <span id="tk-chars" class="cmd-chars"></span></div>
+      <pre class="modal-cmd tall" id="tk-cmd"></pre>
+      <div class="modal-desc">Agent 写完不会自己挪位置。你回来看过觉得行，再用右边「挪到别的阶段」推进。</div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="tk-cancel">关闭</button>
+        <button class="btn primary" id="tk-copy">复制口令</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 新建工作台 -->
+  <div id="wb-modal" class="modal-mask" style="display:none">
+    <div class="modal">
+      <div class="modal-head">
+        <div class="modal-skill">新建工作台</div>
+        <button class="modal-x" id="wb-close">×</button>
+      </div>
+      <div class="modal-desc">工作台就是本地一个目录。选个目录，SkillDeck 会在里面建好骨架（阶段目录 + <code>_context/</code> + <code>_tasks.md</code>）。已有内容不会被覆盖。</div>
+      <label class="modal-label">目录</label>
+      <div class="wb-pick">
+        <input id="wb-dir" class="set-input" placeholder="点右边选一个目录" readonly />
+        <button class="btn" id="wb-browse">浏览</button>
+      </div>
+      <label class="modal-label">用哪套模板</label>
+      <div id="wb-tpl" class="modal-mode"></div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="wb-cancel">取消</button>
+        <button class="btn primary" id="wb-create">建好骨架</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 删除二次确认弹窗（Skill 和专家共用） -->
   <div id="confirm-modal" class="modal-mask" style="display:none">
     <div class="modal modal-sm">
@@ -204,6 +291,7 @@
   </div>
 
   <script src="/icons.js"></script>
+  <script src="/md.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

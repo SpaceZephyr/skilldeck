@@ -4,10 +4,20 @@ const state = {
   skills: [], filtered: [], cat: '全部', q: '',
   agents: [], current: null, prompt: '', es: null,
   experts: [], currentExpert: null, picked: new Set(), view: 'skills',
-  sources: [], source: null,
+  sources: [], source: null, mode: 'skills',
 };
 // 当前来源目录。所有取目录的地方都走这里，没选中来源时为空字符串。
 const curDir = () => (state.source && state.source.dir) || '';
+
+// 工作台状态。mode 决定左侧栏选中的是 Skill 来源还是工作台。
+const bench = {
+  list: [], cur: null, tree: [], tasks: [], templates: [],
+  sel: null,       // 当前选中的节点
+  open: new Set(), // 展开的目录
+  prompt: '',
+};
+// 出工作台口令时要指定 Skill 来源，用最后选过的那个
+const benchSkillDir = () => curDir() || localStorage.getItem('skilldeck-skilldir') || '';
 
 // ---------- 主题（深色/浅色）----------
 function applyTheme(theme) {
@@ -38,6 +48,9 @@ function paintStaticIcons() {
   seg[0].insertAdjacentHTML('afterbegin', icon('deck', 15));
   seg[1].insertAdjacentHTML('afterbegin', icon('expert', 15));
   $('#cf-ico').innerHTML = icon('warn', 20);
+  $('#wb-add').innerHTML = icon('plus') + '新建工作台';
+  $('#doc-obsidian').innerHTML = icon('layers', 15);
+  $('#doc-finder').innerHTML = icon('folder', 15);
 }
 
 async function boot() {
@@ -51,7 +64,343 @@ async function boot() {
     : '<option value="">未检测到 agent</option>';
   wireNav();
   await loadSources();
+  await loadWorkbenches();
 }
+
+// ================= 工作台 =================
+// 工作台 = 本地一个目录。SkillDeck 只做三件事：显示目录、出口令、必要时移动文件。
+// 定时执行归 Agent，产出落进目录，这边打开就能看见。
+
+async function loadWorkbenches(keepDir) {
+  try {
+    const d = await fetch('/api/workbenches').then((r) => r.json());
+    bench.list = d.workbenches || [];
+  } catch (_) { bench.list = []; }
+  renderWorkbenchList();
+  const want = keepDir || (bench.cur && bench.cur.dir);
+  if (want) {
+    const hit = bench.list.find((w) => w.dir === want);
+    if (hit) return openWorkbench(hit, true);
+  }
+}
+function renderWorkbenchList() {
+  $('#wb-list').innerHTML = bench.list
+    .map((w, i) => {
+      const active = state.mode === 'bench' && bench.cur && bench.cur.dir === w.dir;
+      const badge = !w.exists ? '丢失' : (w.fresh ? '●' + w.fresh : String(w.total));
+      return `<div class="src-item ${active ? 'active' : ''} ${w.exists ? '' : 'missing'}" role="button" tabindex="0" data-w="${i}" title="${esc(w.dir)}">
+        <span class="src-ico">${icon('bench', 15)}</span>
+        <span class="src-text">${esc(w.label)}</span>
+        <span class="src-n ${w.fresh ? 'fresh' : ''}">${esc(badge)}</span>
+        <span class="src-del" data-wdel="${i}" title="从列表移除">${icon('close', 13)}</span>
+      </div>`;
+    })
+    .join('');
+  $('#wb-list').querySelectorAll('[data-w]').forEach((el) =>
+    el.addEventListener('click', () => openWorkbench(bench.list[+el.dataset.w]))
+  );
+  $('#wb-list').querySelectorAll('[data-wdel]').forEach((el) =>
+    el.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const w = bench.list[+el.dataset.wdel];
+      askConfirm({
+        title: `从列表移除「${w.label}」`,
+        body: '只是把这个工作台从 SkillDeck 的列表里去掉，目录和里面的文件一个都不动。',
+        target: w.dir,
+        okText: '移除',
+        onOk: async () => {
+          await fetch('/api/workbenches?dir=' + encodeURIComponent(w.dir), { method: 'DELETE' });
+          if (bench.cur && bench.cur.dir === w.dir) { bench.cur = null; state.mode = 'skills'; }
+          await loadWorkbenches();
+          if (state.mode === 'skills') await selectSource(state.source, true);
+          toast('已移除（本地文件没动）');
+        },
+      });
+    })
+  );
+}
+
+async function openWorkbench(w, silent) {
+  if (!w) return;
+  state.mode = 'bench';
+  bench.sel = null;
+  bench.prompt = '';
+  $('#src-icon').innerHTML = icon('bench', 17);
+  $('#src-name').textContent = w.label;
+  $('#src-path').textContent = w.dir;
+  $('#seg').hidden = true;
+  $('#view-skills').hidden = true;
+  $('#view-experts').hidden = true;
+  $('#view-bench').hidden = false;
+  renderSources();
+  await refreshBench();
+  if (!silent) toast(`已切到 ${w.label}`);
+}
+
+async function refreshBench(keepSel) {
+  const w = bench.cur || {};
+  const dir = (bench.cur && bench.cur.dir) || (state.mode === 'bench' && $('#src-path').textContent) || '';
+  const target = bench.cur ? bench.cur.dir : dir;
+  let d;
+  try { d = await fetch('/api/workbench?dir=' + encodeURIComponent(target)).then((r) => r.json()); }
+  catch (e) { d = { error: String(e.message || e) }; }
+  if (d.error) {
+    $('.bench').hidden = true;
+    $('#bench-setup').hidden = false;
+    $('#bench-setup').innerHTML = `<div class="empty-title">工作台打不开</div><div class="empty-path">${esc(d.error)}</div>`;
+    return;
+  }
+  bench.cur = { dir: d.dir, label: d.label, total: d.total, fresh: d.fresh, exists: true };
+  bench.tree = d.tree || [];
+  bench.tasks = d.tasks || [];
+  bench.templates = d.templates || [];
+  // 首次打开默认展开一层目录
+  if (!bench.open.size) bench.tree.filter((n) => n.type === 'dir' && !n.isWork).forEach((n) => bench.open.add(n.path));
+  $('.bench').hidden = false;
+  $('#bench-setup').hidden = true;
+  if (!d.hasTasks) {
+    $('#bench-setup').hidden = false;
+    $('#bench-setup').innerHTML =
+      `<div class="empty-title">这个目录还没有 _tasks.md</div>` +
+      `<div class="empty-path">${esc(d.dir)}</div>` +
+      `<div class="empty-path" style="margin-top:10px">没有任务定义，右边就没有可点的动作。回「新建工作台」选个模板建骨架，或者自己写一个 _tasks.md。</div>`;
+  }
+  $('#bench-count').textContent = d.fresh ? `${d.fresh} 个新的 / 共 ${d.total}` : `共 ${d.total} 项`;
+  renderTree();
+  renderActs();
+  await loadWorkbenchListQuiet();
+}
+// 只刷侧栏角标，不动主区
+async function loadWorkbenchListQuiet() {
+  try {
+    const d = await fetch('/api/workbenches').then((r) => r.json());
+    bench.list = d.workbenches || [];
+    renderWorkbenchList();
+  } catch (_) {}
+}
+
+// ---------- 文件树 ----------
+function renderTree() {
+  $('#tree').innerHTML = treeNodes(bench.tree, 0);
+  $('#tree').querySelectorAll('.tn').forEach((el) =>
+    el.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const p = el.dataset.p;
+      const node = findNode(bench.tree, p);
+      if (!node) return;
+      // 普通目录点了是展开/收起，文件和作品文件夹点了是预览
+      if (node.type === 'dir' && !node.isWork) {
+        bench.open.has(p) ? bench.open.delete(p) : bench.open.add(p);
+        renderTree();
+        return;
+      }
+      selectNode(node);
+    })
+  );
+}
+function treeNodes(nodes, depth) {
+  return nodes
+    .map((n) => {
+      const pad = 10 + depth * 13;
+      const sel = bench.sel && bench.sel.path === n.path ? 'sel' : '';
+      if (n.type === 'dir' && !n.isWork) {
+        const open = bench.open.has(n.path);
+        const badge = n.fresh ? `<span class="tn-fresh">${n.fresh}</span>` : (n.total ? `<span class="tn-n">${n.total}</span>` : '');
+        return `<div class="tn tn-dir ${sel}" data-p="${esc(n.path)}" style="padding-left:${pad}px">
+            <span class="tn-caret ${open ? 'open' : ''}">${icon('caret', 12)}</span>
+            <span class="tn-name">${esc(n.name)}</span>${badge}
+          </div>` + (open ? treeNodes(n.children || [], depth + 1) : '');
+      }
+      const kind = n.isWork ? 'work' : 'file';
+      const dot = n.isNew ? '<span class="tn-dot"></span>' : '';
+      return `<div class="tn tn-${kind} ${sel}" data-p="${esc(n.path)}" style="padding-left:${pad}px">
+          <span class="tn-ico">${icon(n.isWork ? 'work' : 'doc', 13)}</span>
+          <span class="tn-name">${esc(n.name)}</span>${dot}
+        </div>`;
+    })
+    .join('');
+}
+function findNode(nodes, p) {
+  for (const n of nodes) {
+    if (n.path === p) return n;
+    if (n.children) { const hit = findNode(n.children, p); if (hit) return hit; }
+  }
+  return null;
+}
+// 收集所有普通目录，供「挪到别的阶段」用
+function allDirs(nodes, out) {
+  out = out || [];
+  for (const n of nodes || []) {
+    if (n.type === 'dir' && !n.isWork) { out.push(n); allDirs(n.children, out); }
+  }
+  return out;
+}
+
+// ---------- 预览 ----------
+async function selectNode(node) {
+  bench.sel = node;
+  renderTree();
+  renderActs();
+  $('#doc-empty').style.display = 'none';
+  $('#doc-head').hidden = false;
+  $('#doc-title').textContent = node.name;
+  $('#doc').innerHTML = '<p class="doc-loading">读取中…</p>';
+  $('#doc-files').innerHTML = '';
+  try {
+    const d = await fetch(`/api/workbench/file?dir=${encodeURIComponent(bench.cur.dir)}&path=${encodeURIComponent(node.path)}`)
+      .then((r) => r.json());
+    if (d.error) { $('#doc').innerHTML = `<p class="doc-loading">${esc(d.error)}</p>`; return; }
+    if (d.siblings && d.siblings.length > 1) {
+      $('#doc-files').innerHTML = d.siblings
+        .map((f) => `<span class="doc-file ${/^index\.md$/i.test(f) ? 'on' : ''}">${esc(f)}</span>`).join('');
+    }
+    if (d.binary) { $('#doc').innerHTML = `<p class="doc-loading">这是个二进制文件，去访达里看。</p>`; return; }
+    if (d.empty) { $('#doc').innerHTML = `<p class="doc-loading">这个作品文件夹里还没有 index.md。</p>`; return; }
+    $('#doc').innerHTML = renderMarkdown(d.text) || '<p class="doc-loading">（空文件）</p>';
+  } catch (e) {
+    $('#doc').innerHTML = `<p class="doc-loading">读取失败：${esc(e.message || e)}</p>`;
+  }
+}
+
+// ---------- 右侧：能做什么 ----------
+function renderActs() {
+  const sel = bench.sel;
+  const process = bench.tasks.filter((t) => t.kind === 'process');
+  const collect = bench.tasks.filter((t) => t.kind === 'collect');
+
+  $('#acts-target').textContent = sel ? `选中：${sel.name}` : '先在左边选一个作品';
+  // 加工型任务：选中的东西得落在这个任务声明的「输入」目录里，才亮起来
+  $('#acts-process').innerHTML = process
+    .map((t) => {
+      const ok = sel && inInput(sel.path, t.input);
+      return `<button class="act ${ok ? '' : 'off'}" data-t="${t.id}" ${ok ? '' : 'disabled'}
+        title="${esc(t.desc || '')}">${esc(t.name)}<span class="act-io">${esc(t.input)} → ${esc(t.output || '原地')}</span></button>`;
+    })
+    .join('') || '<div class="acts-none">_tasks.md 里还没有带「输入」的任务</div>';
+
+  $('#acts-collect').innerHTML = collect
+    .map((t) => `<button class="act" data-t="${t.id}" title="${esc(t.desc || '')}">${esc(t.name)}<span class="act-io">→ ${esc(t.output || '未指定')}</span></button>`)
+    .join('') || '<div class="acts-none">没有采集型任务</div>';
+
+  document.querySelectorAll('#acts-process .act, #acts-collect .act').forEach((el) =>
+    el.addEventListener('click', () => openTaskPrompt(el.dataset.t))
+  );
+
+  // 挪到别的阶段
+  const movable = sel && sel.type !== 'root';
+  $('#acts-move-sec').hidden = !movable;
+  if (movable) {
+    const dirs = allDirs(bench.tree).filter((d) => path_dirname(sel.path) !== d.path);
+    $('#acts-move').innerHTML = '<option value="">选一个目标目录…</option>' +
+      dirs.map((d) => `<option value="${esc(d.path)}">${esc(d.name)}</option>`).join('');
+  }
+}
+function path_dirname(p) { return p.replace(/\/[^/]*$/, ''); }
+function inInput(selPath, input) {
+  if (!input) return false;
+  const base = bench.cur.dir + '/' + input;
+  return selPath.startsWith(base + '/');
+}
+
+async function openTaskPrompt(taskId) {
+  const t = bench.tasks.find((x) => x.id === taskId);
+  if (!t) return;
+  const target = t.kind === 'process' && bench.sel ? bench.sel.path : '';
+  $('#tk-name').textContent = t.name;
+  $('#tk-sub').textContent = target ? `处理：${bench.sel.name}` : '不需要选中文件，直接跑';
+  $('#tk-cmd').textContent = '生成口令中…';
+  $('#tk-chars').textContent = '';
+  $('#task-modal').style.display = 'grid';
+  try {
+    const url = `/api/workbench/prompt?dir=${encodeURIComponent(bench.cur.dir)}&task=${encodeURIComponent(taskId)}` +
+      `&target=${encodeURIComponent(target)}&skillDir=${encodeURIComponent(benchSkillDir())}`;
+    const d = await fetch(url).then((r) => r.json());
+    if (d.error) { $('#tk-cmd').textContent = '（生成失败）'; return toast(d.error); }
+    bench.prompt = d.prompt;
+    $('#tk-cmd').textContent = d.prompt;
+    $('#tk-chars').textContent = `· ${d.chars} 字`;
+  } catch (e) {
+    $('#tk-cmd').textContent = '（生成失败）';
+  }
+}
+$('#tk-close').addEventListener('click', () => ($('#task-modal').style.display = 'none'));
+$('#tk-cancel').addEventListener('click', () => ($('#task-modal').style.display = 'none'));
+$('#tk-copy').addEventListener('click', async () => {
+  if (!bench.prompt) return toast('口令还没生成好');
+  const ok = await copyText(bench.prompt);
+  if (ok) { toast('已复制，粘到 Codex 或 Claude Code 发送'); $('#task-modal').style.display = 'none'; }
+  else toast('复制失败，请手动全选口令复制');
+});
+
+// 移动作品
+$('#acts-move').addEventListener('change', async (e) => {
+  const to = e.target.value;
+  e.target.value = '';
+  if (!to || !bench.sel) return;
+  const from = bench.sel;
+  askConfirm({
+    title: `把「${from.name}」挪过去`,
+    body: `移动到 ${to.split('/').pop()}。这是普通的文件移动，随时可以再挪回来。`,
+    target: `${from.path}\n  →  ${to}/${from.name}`,
+    okText: '挪过去',
+    onOk: async () => {
+      const url = `/api/workbench/move?dir=${encodeURIComponent(bench.cur.dir)}&from=${encodeURIComponent(from.path)}&to=${encodeURIComponent(to)}`;
+      const d = await fetch(url, { method: 'POST' }).then((r) => r.json()).catch((e) => ({ error: String(e.message || e) }));
+      if (d.error) return toast('移动失败：' + d.error);
+      bench.sel = null;
+      $('#doc-head').hidden = true;
+      $('#doc').innerHTML = '';
+      $('#doc-empty').style.display = 'block';
+      await refreshBench();
+      toast('挪好了');
+    },
+  });
+});
+
+$('#bench-seen').addEventListener('click', async () => {
+  await fetch('/api/workbench/seen?dir=' + encodeURIComponent(bench.cur.dir), { method: 'POST' });
+  await refreshBench();
+  toast('红点清掉了');
+});
+$('#doc-obsidian').addEventListener('click', () => openIn('obsidian'));
+$('#doc-finder').addEventListener('click', () => openIn('finder'));
+async function openIn(app) {
+  if (!bench.sel) return;
+  await fetch(`/api/workbench/open?dir=${encodeURIComponent(bench.cur.dir)}&path=${encodeURIComponent(bench.sel.path)}&app=${app}`, { method: 'POST' });
+}
+
+// ---------- 新建工作台 ----------
+$('#wb-add').addEventListener('click', openWbModal);
+function openWbModal() {
+  $('#wb-dir').value = '';
+  const tpls = bench.templates.length ? bench.templates
+    : [{ id: 'xhs', label: '小红书创作' }, { id: 'wechat', label: '公众号创作' }, { id: 'blank', label: '空白工作台' }];
+  $('#wb-tpl').innerHTML = tpls
+    .map((t, i) => `<label class="mode-opt"><input type="radio" name="wb-tpl" value="${t.id}" ${i === 0 ? 'checked' : ''}> ${esc(t.label)}</label>`)
+    .join('');
+  $('#wb-modal').style.display = 'grid';
+}
+$('#wb-close').addEventListener('click', () => ($('#wb-modal').style.display = 'none'));
+$('#wb-cancel').addEventListener('click', () => ($('#wb-modal').style.display = 'none'));
+$('#wb-browse').addEventListener('click', async () => {
+  const btn = $('#wb-browse');
+  btn.disabled = true;
+  try {
+    const d = await fetch('/api/pick-dir?prompt=' + encodeURIComponent('选一个目录作为工作台')).then((r) => r.json());
+    if (d.dir) $('#wb-dir').value = d.dir;
+  } finally { btn.disabled = false; }
+});
+$('#wb-create').addEventListener('click', async () => {
+  const dir = $('#wb-dir').value.trim();
+  if (!dir) return toast('先选一个目录');
+  const tpl = (document.querySelector('input[name="wb-tpl"]:checked') || {}).value || 'blank';
+  const d = await fetch(`/api/workbench/init?dir=${encodeURIComponent(dir)}&template=${tpl}`, { method: 'POST' })
+    .then((r) => r.json()).catch((e) => ({ error: String(e.message || e) }));
+  if (d.error) return toast('建失败：' + d.error);
+  $('#wb-modal').style.display = 'none';
+  toast(d.made.length ? `建好了：${d.made.join('、')}` : '目录里已经有骨架了，直接用');
+  await loadWorkbenches(dir);
+});
 
 // ---------- 删除二次确认 ----------
 // 所有删除都必须过这里，没有任何一条路径能绕开确认直接删。
@@ -128,8 +477,17 @@ function renderSources() {
 }
 // 切换来源：技能和专家一起换
 async function selectSource(src, silent) {
+  state.mode = 'skills';
   state.source = src || null;
-  if (src) localStorage.setItem('skilldeck-source', src.id);
+  if (src) {
+    localStorage.setItem('skilldeck-source', src.id);
+    localStorage.setItem('skilldeck-skilldir', src.dir);
+  }
+  bench.cur = null;
+  $('#seg').hidden = false;
+  $('#view-bench').hidden = true;
+  switchView(state.view === 'experts' ? 'experts' : 'skills');
+  renderWorkbenchList();
   $('#src-icon').innerHTML = src ? sourceIcon(src, 17) : '';
   $('#src-name').textContent = src ? src.label : '没有可用的 Skill 来源';
   $('#src-path').textContent = src ? src.dir : '点左侧「添加本地目录」手动选一个';
@@ -149,6 +507,7 @@ function wireNav() {
   );
 }
 function switchView(v) {
+  if (state.mode === 'bench') return;
   state.view = v;
   document.querySelectorAll('.seg-item').forEach((el) => el.classList.toggle('active', el.dataset.view === v));
   $('#view-skills').hidden = v !== 'skills';
@@ -642,6 +1001,7 @@ async function pickDir() {
 $('#pick').addEventListener('click', pickDir);
 // 重新扫描当前来源
 $('#reload').addEventListener('click', async () => {
+  if (state.mode === 'bench') { await refreshBench(); return toast('已重新扫描工作台'); }
   await loadSources();
   toast('已重新扫描');
 });

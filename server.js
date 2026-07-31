@@ -108,10 +108,11 @@ function listSources() {
   return [...builtin, ...custom];
 }
 // macOS 原生「选择文件夹」对话框，返回绝对路径
-function pickFolder() {
+function pickFolder(prompt) {
   try {
+    const title = (prompt || '选择本地 Skill 文件夹').replace(/"/g, '');
     const out = execSync(
-      `osascript -e 'POSIX path of (choose folder with prompt "选择本地 Skill 文件夹")'`,
+      `osascript -e 'POSIX path of (choose folder with prompt "${title}")'`,
       { encoding: 'utf8' }
     ).trim();
     return out.replace(/\/$/, '');
@@ -421,6 +422,325 @@ function buildCommand(agentId, name, task, dir, folder) {
   return { bin: agent.bin, args: agent.buildArgs(prompt), prompt, display, injected: !!body };
 }
 
+// ================= 工作台 =================
+// 一个工作台 = 本地一个根目录。SkillDeck 只做三件事：显示目录、出口令、必要时移动文件。
+// 不执行、不调度、不常驻。定时跑什么由你在 Agent 那边配，产出落进目录就行。
+
+// 注册过的工作台目录（存本机 state，gitignore）
+function workbenchDirs() {
+  const s = loadState();
+  return Array.isArray(s.workbenches) ? s.workbenches : [];
+}
+function addWorkbench(dir) {
+  const s = loadState();
+  const list = Array.isArray(s.workbenches) ? s.workbenches : [];
+  s.workbenches = [...new Set([...list, dir])];
+  saveState(s);
+}
+function removeWorkbench(dir) {
+  const s = loadState();
+  s.workbenches = (Array.isArray(s.workbenches) ? s.workbenches : []).filter((d) => d !== dir);
+  const seen = s.wbSeen || {};
+  delete seen[dir];
+  s.wbSeen = seen;
+  saveState(s);
+}
+// 「上次看到哪」的时间戳，用来给新产出打红点
+function lastSeenOf(dir) {
+  const s = loadState();
+  return (s.wbSeen || {})[dir] || 0;
+}
+function markSeen(dir) {
+  const s = loadState();
+  s.wbSeen = { ...(s.wbSeen || {}), [dir]: Date.now() };
+  saveState(s);
+}
+
+const TASKS_FILE = '_tasks.md';
+const CONTEXT_DIR = '_context';
+
+// 解析 _tasks.md：## 是任务名，下面的 key: value 是配置，其余当说明
+function parseTasks(md) {
+  const out = [];
+  let cur = null;
+  for (const raw of String(md || '').split('\n')) {
+    const line = raw.trimEnd();
+    const h = line.match(/^##\s+(.+)$/);
+    if (h) {
+      if (cur) out.push(cur);
+      cur = { name: h[1].trim(), skills: [], expert: '', context: [], input: '', output: '', desc: '' };
+      continue;
+    }
+    if (!cur) continue;
+    const kv = line.match(/^\s*([A-Za-z_一-龥]+)\s*[:：]\s*(.*)$/);
+    const split = (v) => v.split(/[,，、]/).map((x) => x.trim()).filter(Boolean);
+    if (kv) {
+      const k = kv[1].toLowerCase();
+      const v = kv[2].trim();
+      if (k === 'skills' || k === 'skill' || k === '技能') { cur.skills = split(v); continue; }
+      if (k === 'expert' || k === '专家') { cur.expert = v; continue; }
+      if (k === 'context' || k === '上下文') { cur.context = split(v); continue; }
+      if (k === 'input' || k === '输入') { cur.input = v.replace(/\/+$/, ''); continue; }
+      if (k === 'output' || k === '输出') { cur.output = v.replace(/\/+$/, ''); continue; }
+    }
+    if (line.trim()) cur.desc += (cur.desc ? '\n' : '') + line.trim();
+  }
+  if (cur) out.push(cur);
+  // 有「输入」的是加工型（要先选中一个文件），没有的是采集型（直接跑）
+  return out.map((t, i) => ({ ...t, id: 't' + i, kind: t.input ? 'process' : 'collect' }));
+}
+
+function readTasks(wb) {
+  const p = path.join(wb, TASKS_FILE);
+  try { return parseTasks(fs.readFileSync(p, 'utf8')); } catch (_) { return []; }
+}
+// _context/ 下的全局背景文件，每次调用都带上
+function contextFiles(wb) {
+  const d = path.join(wb, CONTEXT_DIR);
+  try {
+    return fs.readdirSync(d)
+      .filter((f) => !f.startsWith('.'))
+      .map((f) => path.join(d, f))
+      .filter((p) => { try { return fs.statSync(p).isFile(); } catch (_) { return false; } });
+  } catch (_) { return []; }
+}
+
+// 扫目录树。作品 = 含 index.md 的文件夹，树里当一个整体显示。
+function scanTree(abs, lastSeen, depth) {
+  let entries = [];
+  try { entries = fs.readdirSync(abs, { withFileTypes: true }); } catch (_) {
+    return { children: [], total: 0, fresh: 0 };
+  }
+  const children = [];
+  let total = 0, fresh = 0;
+  for (const e of entries) {
+    if (e.name.startsWith('.') || e.name === 'node_modules') continue;
+    const p = path.join(abs, e.name);
+    if (e.isDirectory()) {
+      const isWork = ['index.md', 'INDEX.md'].some((f) => fs.existsSync(path.join(p, f)));
+      const sub = depth > 0 ? scanTree(p, lastSeen, depth - 1) : { children: [], total: 0, fresh: 0 };
+      let mt = 0;
+      try { mt = fs.statSync(p).mtimeMs; } catch (_) {}
+      // 作品文件夹按「一个东西」算，它的新旧看目录本身
+      const t = isWork ? 1 : sub.total;
+      const f = isWork ? (mt > lastSeen ? 1 : 0) : sub.fresh;
+      children.push({
+        name: e.name, type: 'dir', path: p, isWork,
+        children: sub.children, total: t, fresh: f, isNew: isWork && mt > lastSeen,
+      });
+      total += t; fresh += f;
+    } else {
+      let mt = 0;
+      try { mt = fs.statSync(p).mtimeMs; } catch (_) {}
+      const isNew = mt > lastSeen;
+      children.push({ name: e.name, type: 'file', path: p, mtime: mt, isNew });
+      total++; if (isNew) fresh++;
+    }
+  }
+  children.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name, 'zh') : a.type === 'dir' ? -1 : 1));
+  return { children, total, fresh };
+}
+
+// 路径必须落在工作台目录里面，防穿越
+function insideWorkbench(wb, target) {
+  const base = path.resolve(wb);
+  const t = path.resolve(target);
+  return t === base || t.startsWith(base + path.sep);
+}
+
+// 一个作品的展示名：文件去掉扩展名，文件夹就是文件夹名
+function workName(p) {
+  const base = path.basename(p);
+  return base.replace(/\.(md|markdown|txt)$/i, '');
+}
+
+// 构造任务口令：背景文件 + Skill 地址 + 处理谁 + 写到哪
+function buildTaskPrompt(wb, task, targetPath, skillDir) {
+  const dir = skillDir || DEFAULT_SKILLS_DIR;
+  const lines = [];
+  lines.push(`工作台：${path.basename(wb)}`);
+  lines.push(`这一步：${task.name}`);
+  if (task.desc) lines.push(`要做的事：${task.desc.replace(/\n/g, ' ')}`);
+  lines.push('');
+
+  // 背景文件：全局 _context/ + 任务自己声明的
+  const ctx = [...contextFiles(wb), ...(task.context || []).map((c) => path.resolve(wb, c))];
+  if (ctx.length) {
+    lines.push('先读这些背景文件：');
+    ctx.forEach((c) => lines.push(`  ${c}`));
+    lines.push('');
+  }
+
+  // Skill：任务点名的 + 专家带的，去重
+  const folders = [...(task.skills || [])];
+  if (task.expert) {
+    const exp = loadExperts().find((e) => e.name === task.expert);
+    if (exp) (exp.skills || []).forEach((f) => folders.push(f));
+  }
+  const uniq = [...new Set(folders)];
+  if (uniq.length) {
+    lines.push(uniq.length > 1 ? '用这些 Skill（按需挑用）：' : '用这个 Skill：');
+    uniq.forEach((f) => {
+      const file = getSkillFile(dir, f);
+      lines.push(`  ${f}${file ? '\n    地址：' + file : '（在 ' + dir + ' 里没找到）'}`);
+    });
+    lines.push('');
+  }
+
+  if (targetPath) {
+    lines.push(`处理：${targetPath}`);
+    const name = workName(targetPath);
+    if (task.output) {
+      const outAbs = path.resolve(wb, task.output);
+      // 输入输出同一个目录 = 就地加工（比如给正文配图），不新建作品
+      const sameDir = path.resolve(path.dirname(targetPath)) === outAbs
+        || (task.input && path.resolve(wb, task.input) === outAbs);
+      if (sameDir) {
+        const workDir = fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory()
+          ? targetPath : path.dirname(targetPath);
+        lines.push(`产物写进同一个作品文件夹：${workDir}`);
+      } else {
+        lines.push(`写到：${path.join(outAbs, name, 'index.md')}`);
+        lines.push(`（这个作品文件夹不存在就新建，附带产物一并放进去）`);
+      }
+    }
+  } else if (task.output) {
+    lines.push(`产出写到：${path.resolve(wb, task.output)}`);
+    lines.push(`一条一个文件夹，正文放 index.md。`);
+  }
+  lines.push('');
+  lines.push('写完不用移动位置，我在 SkillDeck 里看过再决定推进到哪一步。');
+  return lines.join('\n');
+}
+
+// 新建工作台骨架
+const WB_TEMPLATES = {
+  xhs: {
+    label: '小红书创作',
+    dirs: ['选题', '灵感', '大纲', '创作', '完成'],
+    tasks: `# 小红书创作工作台
+
+> 每个 ## 是一个任务。有「输入」的要先在左边选中一个作品才能跑，没有的直接跑。
+> _context/ 里的文件每次调用都会带上，任务也可以用「上下文」再追加。
+
+## 采集今日热点
+skills: xhs-hotnotes, topic-collector
+输出: 选题
+从今天的热点里挑出适合本账号的小红书选题，一条一个文件夹。
+
+## 找灵感和参考
+skills: baokuan-article-analysis
+输入: 选题
+输出: 灵感
+围绕这个选题找同类爆款，拆解它们的钩子和结构。
+
+## 写大纲
+skills: xiaohongshu-content-tools
+输入: 灵感
+输出: 大纲
+定结构：开头钩子、3-5 个要点、结尾互动。
+
+## 写正文
+skills: xiaohongshu-content-tools
+输入: 大纲
+输出: 创作
+按大纲写小红书正文，口语化，多换行。
+
+## 起标题
+skills: baokuan-title-generator
+输入: 创作
+输出: 创作
+给这篇正文起 10 个候选标题，写进作品文件夹的 标题.md。
+
+## 设计配图
+skills: image-studio
+输入: 创作
+输出: 创作
+按正文内容做封面和配图，图片存进这个作品文件夹。
+`,
+  },
+  wechat: {
+    label: '公众号创作',
+    dirs: ['选题', '素材', '大纲', '创作', '完成'],
+    tasks: `# 公众号创作工作台
+
+## 采集选题
+skills: topic-collector
+输出: 选题
+扫最近的热点和素材，产出选题，一条一个文件夹。
+
+## 找论据和金句
+skills: web-scraper
+输入: 选题
+输出: 素材
+围绕选题找案例、数据和可引用的原话。
+
+## 写大纲
+skills: blog-post-writer
+输入: 素材
+输出: 大纲
+先列大纲讨论，不要一次性输出几千字。
+
+## 写正文
+skills: blog-post-writer
+输入: 大纲
+输出: 创作
+按写作风格写正文。
+
+## 起标题
+skills: baokuan-title-generator
+输入: 创作
+输出: 创作
+给这篇起 10 个候选标题，写进 标题.md。
+
+## 审稿
+skills: article-review
+输入: 创作
+输出: 创作
+按审稿标准逐项检查，问题和修改建议写进 审稿.md。
+`,
+  },
+  blank: {
+    label: '空白工作台',
+    dirs: ['输入', '产出'],
+    tasks: `# 工作台
+
+> 每个 ## 是一个任务。有「输入」的要先在左边选中一个作品才能跑，没有的直接跑。
+> 可用字段：skills / expert / 上下文 / 输入 / 输出
+
+## 示例任务
+skills:
+输入: 输入
+输出: 产出
+在这里写这一步要做什么。
+`,
+  },
+};
+
+function initWorkbench(dir, templateId) {
+  const tpl = WB_TEMPLATES[templateId] || WB_TEMPLATES.blank;
+  const made = [];
+  const ctx = path.join(dir, CONTEXT_DIR);
+  if (!fs.existsSync(ctx)) { fs.mkdirSync(ctx, { recursive: true }); made.push(CONTEXT_DIR + '/'); }
+  tpl.dirs.forEach((d, i) => {
+    const p = path.join(dir, `${String(i).padStart(2, '0')} ${d}`);
+    if (!fs.existsSync(p)) { fs.mkdirSync(p, { recursive: true }); made.push(path.basename(p) + '/'); }
+  });
+  const tasksPath = path.join(dir, TASKS_FILE);
+  if (!fs.existsSync(tasksPath)) {
+    // 模板里的输入/输出写的是裸名字，落盘时补上序号前缀
+    let body = tpl.tasks;
+    tpl.dirs.forEach((d, i) => {
+      const numbered = `${String(i).padStart(2, '0')} ${d}`;
+      // 注意不能用 \b：中文后面不构成 \w 边界，正则永远匹配不上。用行尾锚点。
+      body = body.replace(new RegExp(`^(输入|输出): ${d}\\s*$`, 'gm'), `$1: ${numbered}`);
+    });
+    fs.writeFileSync(tasksPath, body);
+    made.push(TASKS_FILE);
+  }
+  return made;
+}
+
 // ---------- HTTP ----------
 function sendJson(res, code, obj) {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -449,7 +769,7 @@ const server = http.createServer(async (req, res) => {
   const p = u.pathname;
 
   if (p === '/' ) return serveStatic(res, 'index.html');
-  if (p === '/app.js' || p === '/icons.js' || p === '/style.css') return serveStatic(res, p.slice(1));
+  if (['/app.js', '/icons.js', '/md.js', '/style.css'].includes(p)) return serveStatic(res, p.slice(1));
 
   if (p === '/api/config') {
     return sendJson(res, 200, {
@@ -564,9 +884,121 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { ok: true, sources: listSources() });
   }
 
+  // ---------- 工作台 ----------
+  if (p === '/api/workbenches' && req.method === 'GET') {
+    const list = workbenchDirs().map((dir) => {
+      const exists = fs.existsSync(dir);
+      const seen = lastSeenOf(dir);
+      const t = exists ? scanTree(dir, seen, 3) : { total: 0, fresh: 0 };
+      return { dir, label: path.basename(dir) || dir, exists, total: t.total, fresh: t.fresh,
+               hasTasks: exists && fs.existsSync(path.join(dir, TASKS_FILE)) };
+    });
+    return sendJson(res, 200, { workbenches: list });
+  }
+  if (p === '/api/workbenches' && req.method === 'POST') {
+    const dir = u.searchParams.get('dir') || '';
+    if (!dir || !fs.existsSync(dir)) return sendJson(res, 400, { error: '目录不存在' });
+    addWorkbench(dir);
+    return sendJson(res, 200, { ok: true, dir });
+  }
+  if (p === '/api/workbenches' && req.method === 'DELETE') {
+    removeWorkbench(u.searchParams.get('dir') || '');
+    return sendJson(res, 200, { ok: true });
+  }
+  // 建骨架：_context/ + 阶段目录 + _tasks.md
+  if (p === '/api/workbench/init' && req.method === 'POST') {
+    const dir = u.searchParams.get('dir') || '';
+    if (!dir || !fs.existsSync(dir)) return sendJson(res, 400, { error: '目录不存在' });
+    try {
+      const made = initWorkbench(dir, u.searchParams.get('template') || 'blank');
+      addWorkbench(dir);
+      return sendJson(res, 200, { ok: true, made });
+    } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
+  }
+  // 目录树 + 任务，一次拉齐
+  if (p === '/api/workbench') {
+    const dir = u.searchParams.get('dir') || '';
+    if (!dir || !fs.existsSync(dir)) return sendJson(res, 400, { error: '工作台目录不在了：' + dir });
+    const seen = lastSeenOf(dir);
+    const t = scanTree(dir, seen, 4);
+    return sendJson(res, 200, {
+      dir, label: path.basename(dir), tree: t.children, total: t.total, fresh: t.fresh,
+      tasks: readTasks(dir), context: contextFiles(dir),
+      hasTasks: fs.existsSync(path.join(dir, TASKS_FILE)),
+      templates: Object.entries(WB_TEMPLATES).map(([id, v]) => ({ id, label: v.label })),
+    });
+  }
+  // 读一个文件的正文（作品文件夹读它的 index.md）
+  if (p === '/api/workbench/file') {
+    const dir = u.searchParams.get('dir') || '';
+    let target = u.searchParams.get('path') || '';
+    if (!insideWorkbench(dir, target)) return sendJson(res, 400, { error: '越界，拒绝读取' });
+    try {
+      let real = target;
+      let siblings = [];
+      if (fs.statSync(target).isDirectory()) {
+        real = ['index.md', 'INDEX.md'].map((f) => path.join(target, f)).find((x) => fs.existsSync(x)) || '';
+        siblings = fs.readdirSync(target).filter((f) => !f.startsWith('.'));
+      }
+      if (!real) return sendJson(res, 200, { text: '', siblings, isDir: true, empty: true });
+      const st = fs.statSync(real);
+      if (st.size > 2 * 1024 * 1024) return sendJson(res, 200, { text: '（文件太大，去 Obsidian 里看）', siblings });
+      if (!/\.(md|markdown|txt|json|ya?ml|csv)$/i.test(real)) {
+        return sendJson(res, 200, { text: '', binary: true, file: real, siblings });
+      }
+      return sendJson(res, 200, { text: fs.readFileSync(real, 'utf8'), file: real, siblings, mtime: st.mtimeMs });
+    } catch (e) { return sendJson(res, 400, { error: String(e.message || e) }); }
+  }
+  // 出任务口令
+  if (p === '/api/workbench/prompt') {
+    const dir = u.searchParams.get('dir') || '';
+    const taskId = u.searchParams.get('task') || '';
+    const target = u.searchParams.get('target') || '';
+    const skillDir = u.searchParams.get('skillDir') || DEFAULT_SKILLS_DIR;
+    const task = readTasks(dir).find((t) => t.id === taskId);
+    if (!task) return sendJson(res, 404, { error: '任务不存在，看看 _tasks.md 改过没' });
+    if (target && !insideWorkbench(dir, target)) return sendJson(res, 400, { error: '越界' });
+    const prompt = buildTaskPrompt(dir, task, target, skillDir);
+    return sendJson(res, 200, { prompt, chars: prompt.length, task: task.name });
+  }
+  // 把作品移到另一个目录（推进 / 退回 / 拖拽都走这里）
+  if (p === '/api/workbench/move' && req.method === 'POST') {
+    const dir = u.searchParams.get('dir') || '';
+    const from = u.searchParams.get('from') || '';
+    const toDir = u.searchParams.get('to') || '';
+    if (!insideWorkbench(dir, from) || !insideWorkbench(dir, toDir)) return sendJson(res, 400, { error: '越界，拒绝移动' });
+    if (!fs.existsSync(from)) return sendJson(res, 400, { error: '源文件已经不在了' });
+    if (!fs.existsSync(toDir)) { try { fs.mkdirSync(toDir, { recursive: true }); } catch (_) {} }
+    if (path.resolve(path.dirname(from)) === path.resolve(toDir)) return sendJson(res, 200, { ok: true, noop: true });
+    let dest = path.join(toDir, path.basename(from));
+    if (fs.existsSync(dest)) return sendJson(res, 400, { error: '目标目录里已经有同名的了：' + path.basename(from) });
+    try { fs.renameSync(from, dest); } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
+    return sendJson(res, 200, { ok: true, to: dest });
+  }
+  // 标记「都看过了」，清红点
+  if (p === '/api/workbench/seen' && req.method === 'POST') {
+    markSeen(u.searchParams.get('dir') || '');
+    return sendJson(res, 200, { ok: true });
+  }
+  // 在 Obsidian / 访达里打开
+  if (p === '/api/workbench/open' && req.method === 'POST') {
+    const dir = u.searchParams.get('dir') || '';
+    const target = u.searchParams.get('path') || '';
+    const app = u.searchParams.get('app') || 'finder';
+    if (!insideWorkbench(dir, target)) return sendJson(res, 400, { error: '越界' });
+    try {
+      if (app === 'obsidian') {
+        spawn('open', [`obsidian://open?path=${encodeURIComponent(target)}`], { stdio: 'ignore', detached: true }).unref();
+      } else {
+        spawn('open', ['-R', target], { stdio: 'ignore', detached: true }).unref();
+      }
+      return sendJson(res, 200, { ok: true });
+    } catch (e) { return sendJson(res, 500, { error: String(e.message || e) }); }
+  }
+
   // 弹出 macOS 原生文件夹选择框，返回绝对路径
   if (p === '/api/pick-dir') {
-    const dir = pickFolder();
+    const dir = pickFolder(u.searchParams.get('prompt'));
     if (!dir) return sendJson(res, 200, { cancelled: true });
     return sendJson(res, 200, { dir });
   }

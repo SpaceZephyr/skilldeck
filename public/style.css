@@ -151,6 +151,7 @@ body {
   font-size: 11px; color: var(--sub); font-family: ui-monospace, monospace;
   margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.seg[hidden] { display: none; }
 .seg {
   display: flex; gap: 3px; background: var(--panel2);
   border: 1px solid var(--line); border-radius: 10px; padding: 3px;
@@ -394,3 +395,112 @@ body {
 .jb-fallback summary { font-size: 12px; color: var(--sub); cursor: pointer; }
 .jb-fallback summary:hover { color: var(--text); }
 .jb-fallback .modal-task { margin: 10px 0 8px; min-height: 90px; font-family: ui-monospace, monospace; font-size: 11.5px; }
+
+/* ================= 工作台 ================= */
+.side-label-2 { margin-top: 18px; }
+.src-item .src-n.fresh { color: var(--on-accent); background: var(--red); border-color: var(--red); }
+
+/* 三栏：文件树 / 预览 / 能做什么 */
+.bench { display: grid; grid-template-columns: 250px minmax(0, 1fr) 230px; height: calc(100vh - 62px); }
+.bench[hidden] { display: none; }
+.bench-tree { border-right: 1px solid var(--line); overflow-y: auto; padding-bottom: 20px; }
+.bench-tree-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 12px 14px 8px; position: sticky; top: 0; background: var(--bg); z-index: 2;
+}
+.bench-count { font-size: 11.5px; color: var(--sub); }
+.linkish { background: none; border: none; color: var(--sub); font-size: 11.5px; cursor: pointer; font-family: inherit; padding: 0; }
+.linkish:hover { color: var(--accent2); }
+
+.tree { font-size: 13px; }
+.tn {
+  display: flex; align-items: center; gap: 6px; padding: 5px 12px 5px 0;
+  cursor: pointer; color: var(--sub); user-select: none; border-radius: 0;
+}
+.tn:hover { background: var(--panel2); color: var(--text); }
+.tn.sel { background: var(--panel2); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
+.tn-dir { font-weight: 600; color: var(--text); }
+.tn-caret { display: flex; color: var(--sub); transition: transform .12s; }
+.tn-caret.open { transform: rotate(90deg); }
+.tn-ico { display: flex; color: var(--sub); }
+.tn-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tn-n { font-size: 10.5px; color: var(--sub); font-weight: 400; }
+.tn-fresh {
+  font-size: 10px; font-weight: 700; color: #fff; background: var(--red);
+  border-radius: 999px; padding: 0 6px; line-height: 16px;
+}
+.tn-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); flex: none; }
+
+/* 中间：预览 */
+.bench-doc { overflow-y: auto; min-width: 0; }
+.bench-doc-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 22px; border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; background: var(--bg); z-index: 2;
+}
+.bench-doc-head[hidden] { display: none; }
+.doc-title { flex: 1; min-width: 0; font-weight: 700; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-acts { display: flex; gap: 6px; }
+.doc-files { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 22px 0; }
+.doc-file {
+  font-size: 11px; color: var(--sub); background: var(--panel2);
+  border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px;
+  font-family: ui-monospace, monospace;
+}
+.doc-file.on { color: var(--accent); border-color: var(--accent); }
+.doc { padding: 18px 22px 60px; line-height: 1.75; max-width: 760px; }
+.doc-loading { color: var(--sub); }
+.doc h1 { font-size: 21px; margin: 18px 0 12px; }
+.doc h2 { font-size: 17px; margin: 22px 0 10px; padding-top: 4px; }
+.doc h3 { font-size: 15px; margin: 18px 0 8px; }
+.doc h4, .doc h5, .doc h6 { font-size: 14px; margin: 14px 0 6px; }
+.doc p { margin: 10px 0; }
+.doc ul, .doc ol { margin: 10px 0 10px 22px; }
+.doc li { margin: 4px 0; }
+.doc blockquote {
+  margin: 12px 0; padding: 8px 14px; color: var(--sub);
+  border-left: 3px solid var(--line); background: var(--panel2); border-radius: 0 8px 8px 0;
+}
+.doc hr { border: none; border-top: 1px solid var(--line); margin: 22px 0; }
+.doc code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; border-radius: 5px; font-size: 12.5px; }
+.doc pre.md-code {
+  background: var(--code-bg); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 14px; overflow-x: auto; margin: 12px 0;
+}
+.doc pre.md-code code { background: none; padding: 0; color: var(--text); font-size: 12.5px; line-height: 1.6; }
+.doc a { color: var(--accent2); }
+.doc img { max-width: 100%; border-radius: 8px; }
+.doc .md-tablewrap { overflow-x: auto; margin: 14px 0; }
+.doc table { border-collapse: collapse; font-size: 13px; }
+.doc th, .doc td { border: 1px solid var(--line); padding: 7px 11px; text-align: left; }
+.doc th { background: var(--panel2); font-weight: 700; }
+.doc .md-fm { margin: 0 0 14px; }
+.doc .md-fm summary { font-size: 11.5px; color: var(--sub); cursor: pointer; }
+.doc .md-fm pre {
+  margin-top: 8px; background: var(--code-bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px 12px; font-size: 11.5px; color: var(--sub); overflow-x: auto;
+}
+
+/* 右侧：能做什么 */
+.bench-acts { border-left: 1px solid var(--line); overflow-y: auto; padding: 14px 12px 30px; }
+.acts-sec { margin-bottom: 22px; }
+.acts-label {
+  font-size: 11px; color: var(--sub); padding: 0 4px 8px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.acts-list { display: flex; flex-direction: column; gap: 6px; }
+.act {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px; width: 100%;
+  background: var(--panel2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 9px; padding: 9px 11px; font-size: 13px; cursor: pointer;
+  font-family: inherit; text-align: left;
+}
+.act:hover { border-color: var(--accent); }
+.act.off { opacity: .35; cursor: default; }
+.act.off:hover { border-color: var(--line); }
+.act-io { font-size: 10.5px; color: var(--sub); font-family: ui-monospace, monospace; }
+.acts-none { font-size: 11.5px; color: var(--sub); padding: 4px; line-height: 1.6; }
+.acts-move { width: 100%; }
+.wb-pick { display: flex; gap: 8px; }
+.wb-pick .set-input { margin-bottom: 0; }
+.modal-cmd.tall { max-height: 320px; }

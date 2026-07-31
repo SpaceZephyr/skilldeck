@@ -31,6 +31,10 @@ const ICONS = {
   close:   'M18 6 6 18M6 6l12 12',
   layers:  'M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
   arrow:   'M5 12h14M12 5l7 7-7 7',
+  bench:   'M3 3h18v4H3zM5 7v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7M9 12h6',
+  doc:     'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9 13h6M9 17h4',
+  work:    'M4 4h6l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM9 14h6M12 11v6',
+  caret:   'M9 18l6-6-6-6',
 };
 function icon(name, size) {
   const d = ICONS[name];
