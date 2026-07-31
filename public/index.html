@@ -12,36 +12,36 @@
     <!-- 侧边栏 -->
     <aside class="sidebar">
       <div class="brand">
-        <span class="logo">▚</span>
+        <span class="logo" id="brand-logo"></span>
         <div>
           <div class="brand-name">SkillDeck</div>
           <div class="brand-sub">技控台</div>
         </div>
       </div>
-      <nav class="nav">
-        <button class="nav-item active" data-view="skills"><span class="nav-ico">🎴</span> Skill</button>
-        <button class="nav-item" data-view="experts"><span class="nav-ico">🧠</span> 专家</button>
-      </nav>
+      <div class="side-label">Skill 来源</div>
+      <nav class="nav" id="src-list"></nav>
+      <button id="pick" class="add-dir">添加本地目录</button>
       <div class="sidebar-foot">
-        <button id="set-open" class="theme-toggle">⚙️ 模型设置</button>
-        <button id="theme-toggle" class="theme-toggle"><span id="theme-ico">🌙</span> <span id="theme-label">深色</span></button>
-        <span id="llm-badge" class="llm-badge"></span>
+        <button id="theme-toggle" class="theme-toggle"><span id="theme-label">深色</span></button>
       </div>
     </aside>
 
     <!-- 主区 -->
     <div class="main-col">
       <header class="topbar">
-        <div class="dir-box">
-          <button id="pick" class="btn">📁 浏览</button>
-          <input id="dir" class="dir-input" placeholder="本地 Skill 文件夹路径" />
-          <select id="dir-history" class="dir-select" title="历史目录"></select>
-          <button id="load" class="btn primary">导入</button>
+        <div class="src-head">
+          <div class="src-title"><span id="src-icon" class="src-icon"></span><span id="src-name">未选择来源</span></div>
+          <div id="src-path" class="src-path"></div>
+        </div>
+        <div class="seg" id="seg">
+          <button class="seg-item active" data-view="skills">技能 <span id="seg-skills-n" class="seg-n"></span></button>
+          <button class="seg-item" data-view="experts">专家 <span id="seg-experts-n" class="seg-n"></span></button>
         </div>
         <div class="agent-box">
           <span class="agent-label">本地 Agent</span>
           <select id="agent" class="agent-select"></select>
         </div>
+        <button id="reload" class="btn icon-btn" title="重新扫描当前目录"></button>
       </header>
 
       <!-- 视图：Skill -->
@@ -58,8 +58,8 @@
       <!-- 视图：专家 -->
       <section id="view-experts" class="view" hidden>
         <div class="toolbar">
-          <button id="exp-auto" class="btn primary">✨ AI 自动分类生成专家</button>
-          <button id="exp-manual" class="btn">＋ 手动创建专家</button>
+          <button id="exp-auto" class="btn primary">让 Codex / Claude Code 自动分类</button>
+          <button id="exp-manual" class="btn">手动创建专家</button>
           <span id="exp-count" class="count"></span>
         </div>
         <main id="exp-grid" class="grid"></main>
@@ -125,7 +125,6 @@
         <button class="modal-x" id="cm-close">×</button>
       </div>
       <div class="cm-row">
-        <input id="cm-emoji" class="cm-emoji" maxlength="4" placeholder="🧩" />
         <input id="cm-name" class="cm-name" placeholder="专家名，例如：内容创作专家" />
       </div>
       <input id="cm-desc" class="cm-desc" placeholder="一句话说明这个专家能干什么（可留空）" />
@@ -139,24 +138,56 @@
     </div>
   </div>
 
-  <!-- 模型设置弹窗 -->
-  <div id="set-modal" class="modal-mask" style="display:none">
+  <!-- 自动分类：出口令给 Codex / Claude Code 跑，等它回传 -->
+  <div id="job-modal" class="modal-mask" style="display:none">
     <div class="modal">
       <div class="modal-head">
-        <div class="modal-skill">⚙️ 模型设置</div>
-        <button class="modal-x" id="set-close">×</button>
+        <div>
+          <div class="modal-skill">让 Codex / Claude Code 自动分类</div>
+          <div class="modal-cat" id="jb-sub"></div>
+        </div>
+        <button class="modal-x" id="jb-close">×</button>
       </div>
-      <div class="modal-desc">用于「AI 自动分类生成专家」。密钥只保存在本机 <code>.skilldeck.local.json</code>（已加入 .gitignore，不会提交到仓库，也不会下发到页面）。</div>
-      <label class="modal-label">API URL</label>
-      <input id="set-url" class="set-input" placeholder="https://api.deepseek.com" />
-      <label class="modal-label">模型名称</label>
-      <input id="set-model" class="set-input" placeholder="deepseek-v4-pro" />
-      <label class="modal-label">API Key</label>
-      <input id="set-key" class="set-input" type="password" autocomplete="off" placeholder="sk-..." />
-      <div id="set-hint" class="cmd-chars"></div>
+      <div class="modal-desc">SkillDeck 不接任何大模型 API。复制下面这段口令，粘到 Codex 或 Claude Code 里发送，它分好类会自己把结果回传过来，这个窗口会实时显示进度。</div>
+
+      <div class="jb-steps">
+        <div class="jb-step" id="jb-step1"><span class="jb-num">1</span>复制口令</div>
+        <div class="jb-step" id="jb-step2"><span class="jb-num">2</span>粘到 Codex / Claude Code 发送</div>
+        <div class="jb-step" id="jb-step3"><span class="jb-num">3</span>等它回传结果</div>
+      </div>
+
+      <div class="modal-cmd-label">口令 <span id="jb-chars" class="cmd-chars"></span></div>
+      <pre class="modal-cmd" id="jb-cmd">生成中…</pre>
+
+      <div class="jb-status" id="jb-status"><span class="jb-dot"></span><span id="jb-status-text">还没开始，先复制口令</span></div>
+      <div class="jb-result" id="jb-result" style="display:none"></div>
+
+      <details class="jb-fallback">
+        <summary>agent 跑不了 curl？把它输出的 JSON 贴这里</summary>
+        <textarea id="jb-paste" class="modal-task" placeholder='{"experts":[{"name":"内容创作专家","description":"…","skills":["folder-a","folder-b"]}]}'></textarea>
+        <button class="btn" id="jb-paste-go">导入这段 JSON</button>
+      </details>
+
       <div class="modal-actions">
-        <button class="btn ghost" id="set-cancel">取消</button>
-        <button class="btn primary" id="set-save">保存</button>
+        <button class="btn ghost" id="jb-cancel">关闭</button>
+        <button class="btn primary" id="jb-copy">复制口令</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 删除二次确认弹窗（Skill 和专家共用） -->
+  <div id="confirm-modal" class="modal-mask" style="display:none">
+    <div class="modal modal-sm">
+      <div class="confirm-head">
+        <span class="confirm-ico" id="cf-ico"></span>
+        <div class="modal-skill" id="cf-title">确认删除</div>
+      </div>
+      <div class="confirm-body" id="cf-body"></div>
+      <div class="confirm-target" id="cf-target"></div>
+      <div class="confirm-note" id="cf-note"></div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="cf-cancel">取消</button>
+        <button class="btn danger" id="cf-ok">确认删除</button>
       </div>
     </div>
   </div>
@@ -172,6 +203,7 @@
     <pre class="run-out" id="run-out"></pre>
   </div>
 
+  <script src="/icons.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
